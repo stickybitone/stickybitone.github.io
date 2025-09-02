@@ -1,0 +1,208 @@
+<html>
+<head>
+<title>Blog 002 • sticky-bit-1</title>
+<link rel="stylesheet" href="../../css/blog.css">
+</head>
+<body>
+<main>
+<h1
+id="network-traffic-analysis-without-administrative-access-a-comprehensive-guide">Network
+Traffic Analysis Without Administrative Access: A Comprehensive
+Guide</h1>
+<h2 id="introduction">Introduction</h2>
+<p>As a pentester, you encounter various challenges during different
+types of assessments. Most of the time, you work remotely, but sometimes
+you need to conduct on-site assessments that require analyzing
+client-server communication of specific software applications. </p>
+<p>A common obstacle is that customers are not really eager to grant administrative
+rights on the hosts where target applications are installed, preventing
+you from installing essential tools like Wireshark to perform network
+traffic analysis. In some cases, it is even not possible because of the
+internal policies, so you need to think creatively about how to bypass
+such restrictions and perform a penetration test to the full extent
+required by your contract.</p>
+<p>In this blog article, we explore three practical methods for
+conducting network sniffing even when you don’t have administrative
+control over the target host, enabling you to fulfill your testing
+objectives without compromising security policies.</p>
+<h2 id="the-challenge">The Challenge</h2>
+<p>When faced with restricted access scenarios, you might consider these
+problematic approaches:</p> 
+<ol> 
+<li>Pressuring the system administrator for
+administrative rights: Just kidding. Simply don’t do it. This approach
+can damage client relationships and is unprofessional.</li>
+<li>Escalating privileges through vulnerability exploitation: While privilege
+escalation is part of penetration testing, modern systems have
+significantly reduced attack surfaces (the days when SeImpersonate
+privilege was granted to almost any account are long gone).</li>
+</ol>
+<p>Fortunately, there are legitimate alternatives that don’t require
+administrative access on the target system.</p>
+<h3 id="solution-1-bridged-network-interfaces">Solution 1: Bridged
+Network Interfaces</h3>
+<h4 id="required-equipment">Required Equipment</h4>
+<ul>
+<li><strong>USB Ethernet adapters</strong>: Portable network interfaces
+for your laptop (at least one should be already provided on your laptop,
+otherwise two adapters).</li>
+
+<li><strong>Ethernet cables</strong>: Usually available on-site, but
+just in case.</li>
+</ul>
+<h4>Network Setup Architecture</h4>
+The concept involves transforming your pentesting laptop into a network bridge that
+intercepts all traffic from the client.
+<pre><code>        USB Ethernet 1 (eth1) -&gt; Ethernet cable -&gt; Switch/Router
+        /
+Pentester PC (Wireshark)
+        \
+        USB Ethernet 2 (eth2) -&gt; Ethernet cable -&gt; Client </code></pre>
+<p class="caption"><em>Bridged interface network topology: the pentesting laptop with
+two USB Ethernet adapters connected to it. One is connected to the
+switch or router, the other one - to the client.</em> 
+<h4 id="innstallation-and-configuration">Installation and Configuration</h4>
+<p>First, install the bridge utilities package (not provided by default
+on Kali Linux):</p>
+<pre><code>sudo apt-get install bridge-utils</code></pre>
+<p class="caption"><em>Code Snippet 1: Installing bridge utilities package</em></p>
+<p>Next, configure the bridged interface with the following commands:</p>
+<pre><code>
+# Take down both network interfaces
+ifconfig eth1 down
+ifconfig eth2 down
+
+# Create a new bridge interface
+brctl addbr br0
+
+# Add both ethernet interfaces to the bridge
+brctl addif br0 eth1
+brctl addif br0 eth2
+
+# Bring up all interfaces
+ifconfig eth1 up
+ifconfig eth2 up
+ifconfig br0 up 
+
+# Obtain IP address via DHCP
+dhclient br0</code></pre>
+<p class="caption"><em>Code Snippet 2: Bridge interface configuration commands</em></p>
+<p>Once configured, your bridge interface will automatically obtain an
+IP address, and the client’s Ethernet interface will establish
+connectivity through your laptop. At this point, launch Wireshark and
+monitor the <strong>br0</strong> interface to capture all traffic
+flowing between the client and the network.</p>
+<h3 id="solution-2-wireless-access-point-hotspot">Solution 2: Wireless
+Access Point (Hotspot)</h3>
+<h4 id="use-case">Use Case</h4>
+<p>This method is ideal when the target device lacks Ethernet
+connectivity and relies solely on wireless connection. </p>
+<h4>Prerequisites</h4>
+<ul>
+<li><strong>Main network interface</strong>: for internet
+connectivity (assumed as eth1)</li>
+<li><strong>Wireless interface</strong>:
+for creating the access point (assumed as wlan0)</li>
+</ul>
+<h4 id="configuration-steps">Configuration Steps</h4>
+Wireless Interface Setup Assign a unique IP to your wireless
+adapter:
+<pre><code>sudo ip addr add 10.0.0.1/24 dev wlan0</code></pre>
+<p class="caption"><em>Code Snippet 3: Configuring wireless adapter IP address</em></p>
+DHCP Service Configuration Edit the dnsmasq configuration file
+(/etc/dnsmasq.conf):
+<pre><code>
+domain-needed
+bogus-priv
+no-resolv
+filterwin2k
+expand-hosts
+domain=localdomain
+local=/localdomain/
+listen-address=10.0.0.1
+dhcp-range=10.0.0.100,10.0.0.199,12h
+dhcp-lease-max=100
+dcp-option=option:router,10.0.0.1
+dhcp-authoritative
+server=8.8.8.8
+server=8.8.4.4</code></pre>
+<p class="caption"><em>Code Snippet 4: dnsmasq configuration for DHCP services</em></p>
+<p>Start the DHCP server:</p>
+<pre><code>sudo dnsmasq -C /etc/dnsmasq.conf</code></pre>
+<p class="caption"><em>Code Snippet 5: Starting the DHCP server</em></p>
+<h4>Access Point Configuration</h4>
+Create the hostapd configurationfile:
+<pre><code>touch /etc/hostapd/hostapd.conf</code></pre>
+<p>Configure the access point parameters:</p>
+<pre><code>interface=wlan0
+ssid=MYAP
+channel=11
+hw_mode=g
+ieee80211n=1
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+wpa_passphrase=MyS3CuR3Passw0rd!</code></pre>
+<p class="caption"><em>Code Snippet 6: hostapd configuration for wireless access
+point</em> Launch the access point:</p>
+<pre><code>sudo hostapd hostapd.conf</code></pre>
+<p class="caption"><em>Code Snippet 7: Starting hostapd service</em></p>
+<h4>Network Forwarding and NAT Configuration</h4>
+<p>Enable IP forwarding:</p>
+<pre><code>sudo echo 1 &gt; /proc/sys/net/ipv4/ip_forward</code></pre>
+<p class="caption"><em>Code Snippet 8: Enabling IP forwarding</em></p>
+<p>Configure NAT using iptables:</p>
+<pre><code>sudo iptables -t nat -A POSTROUTING -o eth1 -s 10.0.0.0/24 -j MASQUERADE</code></pre>
+<p class="caption"><em>Code Snippet 9: Configuring NAT for internet access</em> </p>
+<p>Additional Forwarding Rules: In some cases, you may need explicit forwarding rules:</p>
+<pre><code>
+iptables -A FORWARD -i wlan0 -o eth1 -s 10.0.0.0/24 -j ACCEPT
+iptables -A FORWARD -i eth1 -o wlan0 -d 10.0.0.0/24 -j ACCEPT</code></pre>
+<p class="caption"><em>Code Snippet 10: Additional forwarding rules for traffic
+routing</em></p> 
+<p>Verify your configuration:</p>
+<pre><code>
+sudo iptables -L 
+sudo iptables -t nat -L</code></pre>
+<p class="caption"><em>Code Snippet 11: Verifying NAT configuration</em> After
+completing the setup, test the access point by connecting a device and
+verifying internet connectivity. Once confirmed, start Wireshark on the
+<strong>wlan0</strong> interface to capture client traffic.</p>
+<h3 id="solution-3-managed-switch-port-mirroring">Solution 3: Managed
+Switch Port Mirroring</h3>
+<h4 id="prerequisites">Prerequisites</h4>
+<p>This method requires cooperating with the system administrator as
+they should adjust a configuration on the <strong>managed</strong>
+network switch that supports port mirroring functionality.</p>
+<h4 id="configuration-scheme">Configuration Scheme</h4>
+<pre><code>                 / -&gt; port 2 (mirroring port) -&gt; Pentest laptop
+router -&gt; switch 
+                 \ -&gt; port 3 (mirrored port) -&gt; Client to be analyzed</code></pre>
+<p class="caption"><em>Port mirroring setup: Traffic from the client port is mirrored to
+the monitoring port</em></p>
+<h4 id="configuration-process">Configuration Process</h4>
+<p>Request the system administrator to configure port mirroring on an
+available switch port, whereby the target client is connected on the
+source/mirrored port, and your pentesting laptop is connected on the
+destination/mirroring port. 
+<h4>Switch Configuration Example</h4> 
+The following example demonstrates configuration on a TP-Link TL-SG105E
+managed switch:</p>
+<p class="caption"><img src="./img/002-port-mirroring-1.png"
+alt="TL-SG105E Config Page" /> <em>TP-LINK Web Interface: port mirroring
+configuration showing the setup for duplicating traffic from port 3
+(client) to port 2 (pentester laptop)</em></p>
+<p>Once the switch configuration is active, launch Wireshark. You will
+capture all traffic flowing through the mirrored port.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>These three methods provide practical solutions for conducting
+network traffic analysis during penetration tests when administrative
+access is restricted. Each approach offers distinct advantages:
+<ul>
+<li><strong>Bridged interfaces</strong>: Ideal for wired connections</li>
+<li><strong>Wireless access point</strong>: Perfect for WiFi-only devices</li>
+<li><strong>Port mirroring</strong>: Requires managed switch</li>
+</ul>
+<p>Remember to always coordinate with system administrators and document
+your testing methodology to ensure transparency and maintain trust
+throughout the engagement.</p>
