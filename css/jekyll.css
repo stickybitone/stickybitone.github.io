@@ -345,10 +345,20 @@ body {
     border-top: none;
     padding-top: 0;
 }
-}.icon-links .icon-link-item {
+}
+
+.icon-links .icon-link-item {
     display: inline-block;
     margin-left: 5px;
 }
+
+.icon-item
+{
+    display: inline-block;
+    margin-left: 5px;
+    margin-top: 5px;
+}
+
 .icon-links .icon-link {
     display: inline-block;
 }
