@@ -499,3 +499,14 @@ body {
     font-size: 11px;
 }
 }
+
+.image-row {
+     display: flex;
+     justify-content: center;
+     gap: 10px; /* space between images */
+   }
+.image-row img {
+     width: 100px;
+     height: auto;
+}
+
