@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>stickybitone•blog•003</title>
+    <link rel="stylesheet" href="../../css/blog.css">
+</head>
+<body>
+<main>
+    <div class="container">
+        <h1>Advanced Debugging with WinDbg: Mastering Process Context Switching</h1>
+        
+        <p>When debugging malware or complex applications, you'll sometimes hit a wall that stops even experienced developers in their tracks. One of the most frustrating scenarios? When your code writes to another process's memory, but you can't see what's actually there. Today, we'll explore an advanced WinDbg technique that solves this problem through kernel-mode debugging and process context switching.</p>
+
+        <h2>The Problem: Cross-Process Memory Access</h2>
+        
+        <p>Imagine you're debugging an application that injects code into another process — a common technique in both legitimate software and malware. You set your breakpoints, step through the code, and watch as <code>VirtualAllocEx</code> allocates memory in the target process. Everything seems to work. <code>WriteProcessMemory</code> returns success. But when you try to examine that memory... nothing but question marks.</p>
+        
+        <p>This isn't a bug — it's a fundamental limitation of user-mode debugging. When you're debugging Process A, you're operating in that process's context. You simply don't have direct access to Process B's memory space, even when Process A is the one writing to it.</p>
+
+        <h2>The Real-World Scenario</h2>
+        
+        <p>Let's walk through a concrete example using Dirty-Vanity, a process injection tool I'm currently doing research on. The application allocates memory in an external process using <code>VirtualAllocEx</code>, then writes shellcode to it with <code>WriteProcessMemory</code>. </p>
+
+	<figure>
+	<img src="./img/01-user-mode-4.png" alt="Dirty-Vanity StdOut: Allocated Memory Address" />
+	<figcaption aria-hidden="true">Dirty-Vanity stdout: Allocated memory address</figcaption>
+	</figure>
+
+	<figure>
+	<img src="./img/01-user-mode-3.png" alt="WinDbg: Reading Memory Address" />
+	<figcaption aria-hidden="true">WinDbg: Unable to read the contents of the allocated memory address</figcaption>
+	</figure>
+
+	<p>In standard user-mode debugging, even after the write operation succeeds, attempting to view that memory address shows only "???" — the debugger's way of saying "access denied."</p>
+        
+        <p>This creates a significant problem: How can you verify that your code injection worked correctly? How can you analyze the shellcode that was written?</p>
+
+	<p class="link">This is where the <a href="https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/-process--set-process-context-." target="_blank">process context</a> comes into play</p>
+
+	<p>Let's try to list the process contexts from the user-mode:</p>
+<pre><code>0:000> !process 0 0 powershell.exe
+Could not get address of nt!KdVersionBlock.
+Could not get address of nt!KdVersionBlock.
+unable to get nt!MmUserProbeAddress
+NT symbols are incorrect, please fix symbols</code></pre>
+
+        <h2>Setting Up Kernel Debugging</h2>
+        
+        <p>To solve this problem, you'll need to level up from user-mode to kernel-mode debugging. This requires a two-machine setup:</p>
+        
+        <p><strong>Machine 1: The Debuggee</strong> - This is your test machine where the code will run. It needs, like your development machine, a Windows SDK installed (the Debugging Tools only will suffice).</p>
+        
+        <p><strong>Machine 2: The Debugger</strong> - Your development machine running WinDbg, which the Debuggee machine will be connected to.</p>
+
+        <h3>Establishing the Connection</h3>
+        
+        <p>On the debuggee machine, open an elevated command prompt and run:</p>
+        
+        <pre><code>cd "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64"
+.\kdnet &lt;debugger's IP&gt; &lt;port number&gt;</code></pre>
+       
+	<p>The standard port is 50000, but you can choose any available port. </p>
+        <p>This generates a unique key that you'll need to provide to your debugger machine. </p>
+        
+	<figure>
+	<img src="./img/01-kernel-mode-1.png" alt="WinDbg: Configuring Kernel Debugging" />
+	<figcaption aria-hidden="true">WinDbg: Configuring Kernel Debugging. On your debugger machine, open WinDbg and select "Attach to kernel." Enter the debuggee's connection string with the key you received. When configured correctly, restart the debuggee machine, and WinDbg will automatically connect as the system boots.</figcaption>
+	</figure>
+
+	<figure>
+	<img src="./img/01-kernel-mode-2.png" alt="WinDbg: The debuggee has been connected" />
+	<figcaption aria-hidden="true">WinDbg: The debuggee has successfully connected to the debugging machine</figcaption>
+	</figure>
+
+        <h2>Intercepting Your Target Process</h2>
+        
+        <p>Here's where things get interesting. Unlike user-mode debugging where you attach to a specific process, kernel debugging gives you access to the entire system.</p>
+        
+        <p>To intercept your specific application, you need to force the application to break during execution by inserting the instruction <code>__debugbreak()</code> directly into your code at the point at which you want to start debugging. When your application reaches this instruction, a breakpoint will be triggered in the kernel debugger.</p>
+        
+        <p>After the breakpoint hits, reload your symbols to ensure proper synchronization:</p>
+        
+        <pre><code>.reload</code></pre>
+
+	<figure>
+	<img src="./img/01-kernel-mode-4.png" alt="WinDbg: .reload and lml" />
+	<figcaption aria-hidden="true">WinDbg: Reloading symbols. Checking loaded symbols.</figcaption>
+	</figure>
+
+        <h2>The Magic: Process Context Switching</h2>
+        
+        <p>Even after connecting with kernel debugging, you're still not quite there. If you try to examine the injected memory, you'll still see question marks. Why? Because you're still in the context of the injecting process, not the target process.</p>
+        
+        <p>First, identify the target process. Use the <code>!process</code> command to list all running processes of the particular image into which you are injecting the shellcode into. In my case, this is powershell.exe.</p>
+        
+        <pre><code>!process 0 0 powershell.exe</code></pre>
+
+	<figure>
+	<img src="./img/01-kernel-mode-6.png" alt="WinDbg: Showing information about particular images" />
+	<figcaption aria-hidden="true">WinDbg: Displaying kernel information about powershell.exe processes. Finding the required process.</figcaption>
+	</figure>
+        
+        <p>This shows all PowerShell processes on the system. Find your target process by its PID. Note that in kernel-mode, PIDs are displayed in hexadecimal as the "Cid" value. My target has PID 9360 (decimal) or 0x2490 (hex).</p>
+        
+        <p>Each process entry shows its EPROCESS address — a kernel data structure that represents the process. This is your key to switching contexts.</p>
+
+        <h2>Making the Switch</h2>
+        
+        <p>Now comes the critical command:</p>
+        
+        <pre><code>.process /r /i /p &lt;EPROCESS address&gt;</code></pre>
+        
+        <p>The flags mean:</p>
+        <ul>
+            <li><code>/r</code> - Reload user-mode symbols for the new context</li>
+            <li><code>/i</code> - Invasive mode (allows more control)</li>
+            <li><code>/p</code> - Switch the process context</li>
+        </ul>
+        
+        <p>After executing this command, you'll need to continue execution until the debugger confirms the context switch is complete. Press 'g' to go, and the debugger will break again once it's switched.</p>
+
+	<figure>
+	<img src="./img/01-kernel-mode-7.png" alt="WinDbg: process context switch" />
+	<figcaption aria-hidden="true">WinDbg: Process context switch. Checking the context before and after the switch.</figcaption>
+	</figure>
+
+        <h2>Examining the Injected Memory</h2>
+        
+        <p>Now you're operating in the target process's context. But there's a catch: your source code synchronization is lost. Breakpoints set in your original source file won't work anymore because you're now debugging a different process.</p>
+        
+        <p>The solution? Use hardware breakpoints on specific memory addresses:</p>
+        
+        <pre><code>ba w1 &lt;memory address&gt;</code></pre>
+        
+        <p>This sets a write breakpoint. When <code>WriteProcessMemory</code> begins writing to your allocated memory, the debugger will break. You can then watch as the shellcode is written byte by byte.</p>
+        
+        <p>After the write operation completes, examine the memory:</p>
+        
+        <pre><code>db &lt;memory address&gt;</code></pre>
+        
+        <p>Success! Instead of question marks, you'll see the actual shellcode bytes that were written. You can now disassemble it, analyze it, and verify that your injection worked exactly as intended.</p>
+
+	<figure>
+	<img src="./img/01-kernel-mode-8.png" alt="WinDbg: Accessing memory of external process" />
+	<figcaption aria-hidden="true">WinDbg: The external memory address can finally be read.</figcaption>
+	</figure>
+
+        <h2>Conclusion</h2>
+        
+        <p>Process context switching in WinDbg might seem daunting at first, but it's an invaluable technique for advanced debugging scenarios. While user-mode debugging is sufficient for most everyday tasks, kernel-mode debugging with context switching opens up an entirely new level of system understanding.</p>
+        
+        <div class="highlight-box">
+            <p><strong>The key takeaways:</strong></p>
+            <ol>
+                <li>User-mode debugging can't access external process memory</li>
+                <li>Kernel debugging provides system-wide visibility</li>
+                <li>The <code>.process</code> command switches your debugging context</li>
+                <li>Hardware breakpoints are your friend after context switching</li>
+            </ol>
+        </div>
+        
+        <h2>Further Reading</h2>
+	<p class="link">For more advanced Windows kernel debugging techniques, including remote debugging and additional exploitation scenarios, check out <a href="https://trovent.io/en/windows-kernel-exploitation/" target="_blank">my security research by Trovent Security</a></p>
+
+        <p class="link">Microsoft's official documentation for <a href="https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/-process--set-process-context-" target="_blank">.process command</a> and <a href="https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/-process" target="_blank">!process command</a> provide additional technical details.</p>
+
+        <hr>
+        
+        <div class="warning-box">
+            <p><em><strong>Remember:</strong> These techniques are powerful tools for legitimate security research and debugging. Always ensure you have proper authorization before debugging or analyzing any system or application.</em></p>
+        </div>
+    </div>
+</main>
+</body>
+</html>
