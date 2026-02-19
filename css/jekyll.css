@@ -505,8 +505,20 @@ body {
      justify-content: center;
      gap: 10px; /* space between images */
    }
+
+.image-row-2 {
+     display: flex;
+     justify-content: center;
+     gap: 10px; /* space between images */
+   }
+
 .image-row img {
      width: 100px;
+     height: auto;
+}
+
+.image-row-2 img {
+     width: 220px;
      height: auto;
 }
 
