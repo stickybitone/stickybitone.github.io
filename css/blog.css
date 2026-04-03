@@ -62,4 +62,22 @@
     .link a {
       color: inherit;
     }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      max-width: 640px;
+      margin: 0 auto;
+    }
 
+    .prereq-box {
+      background: #161b22;
+      border-left: 3px solid var(--yellow);
+      border-radius: 0 6px 6px 0;
+      padding: 0.7rem 1rem;
+      margin-bottom: 1.2rem;
+      font-size: 0.93rem;
+    }
+
+    .badge-prereq { background: #21262d; color: var(--yellow); border: 1px solid var(--yellow); }
+    .badge-source { background: #21262d; color: var(--green);  border: 1px solid var(--green);  }
+    .badge-level  { background: #21262d; color: var(--red);    border: 1px solid var(--red);    }
